@@ -739,6 +739,17 @@ fn enable(regs: Regs) {
         w.set_enable(true);
         w.set_key(vals::PwrenKey::KEY);
     });
+
+    // The peripheral is not addressable for a short window after PWREN, and a
+    // register write that lands inside it is dropped. DriverLib waits
+    // POWER_STARTUP_DELAY here, as does every other driver in this crate.
+    //
+    // It matters more here than the delay's length suggests: the first access
+    // after this returns is `configure`'s write to CLKSEL, so the write that
+    // gets dropped is the clock source itself, while every later one lands. A
+    // UART with no clock has a stopped baud generator -- nothing is ever
+    // transmitted, and EOT never fires to say so.
+    cortex_m::asm::delay(16);
 }
 
 fn configure(

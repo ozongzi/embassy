@@ -100,6 +100,14 @@ impl TimxDriver {
             w.set_key(PwrenKey::KEY);
         });
 
+        // The peripheral is not addressable for a short window after PWREN, and
+        // a register access that lands inside it is dropped. DriverLib waits
+        // POWER_STARTUP_DELAY here, as does every other driver in this crate.
+        // The next access is the clock select below, so without this the timer
+        // can come up with no clock source -- and this timer is what every
+        // `Timer` in the program is waiting on.
+        cortex_m::asm::delay(16);
+
         // Following the instructions according to SLAU847D 23.2.1: TIMCLK Configuration
 
         // 1. Select TIMCLK source
