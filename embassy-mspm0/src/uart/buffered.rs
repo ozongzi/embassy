@@ -843,6 +843,13 @@ impl<'d> BufferedUartTx<'d> {
 
             if n == 0 {
                 state.tx_waker.register(cx.waker());
+                // A full ring is the one case where the writer cannot make
+                // progress on its own, so the only way out is a handler pass
+                // that drains some of it. Pending one here costs a single
+                // handler entry and means a ring that filled while the mask
+                // happened to be off still gets moving, instead of parking the
+                // writer on a wakeup nothing is left to deliver.
+                self.info.interrupt.pend();
                 return Poll::Pending;
             }
 
@@ -1038,6 +1045,21 @@ fn on_interrupt(r: Regs, state: &'static BufferedState) {
 
         if n_written > 0 {
             // EOT will wake.
+            //
+            // The flag is dropped before the mask goes back on, because RIS is
+            // set whether or not EOT is masked and the branch above is the only
+            // thing that clears it. A transfer that finished while EOT was
+            // masked -- which is every transfer, since the mask comes off as
+            // soon as the ring runs dry and the last FIFO entries drain after
+            // that -- leaves a completion behind. Unmasking on top of it
+            // re-enters this handler immediately, for a transfer that is over,
+            // and that pass finds the FIFO still full from the writes above:
+            // `n_written` is 0, the mask stays off, and nothing is left to
+            // shovel the rest of the ring or to wake `tx_waker`.
+            r.cpu_int(0).iclr().write(|w| {
+                w.set_eot(true);
+            });
+
             r.cpu_int(0).imask().modify(|w| {
                 w.set_eot(true);
             });
